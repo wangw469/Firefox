@@ -5996,12 +5996,6 @@ void nsIFrame::MarkSubtreeDirty() {
 }
 
 /* virtual */
-nscoord nsIFrame::GetMinISize(gfxContext* aRenderingContext) { return 0; }
-
-/* virtual */
-nscoord nsIFrame::GetPrefISize(gfxContext* aRenderingContext) { return 0; }
-
-/* virtual */
 void nsIFrame::AddInlineMinISize(gfxContext* aRenderingContext,
                                  nsIFrame::InlineMinISizeData* aData) {
   nscoord isize = nsLayoutUtils::IntrinsicForContainer(
@@ -6725,6 +6719,24 @@ nscoord nsIFrame::ShrinkISizeToFit(gfxContext* aRenderingContext,
     }
   }
   return result;
+}
+
+nscoord nsIFrame::IntrinsicISizeFromInline(gfxContext* aContext,
+                                           IntrinsicISizeType aType) {
+  MOZ_ASSERT(!IsContainerForFontSizeInflation(),
+             "Should not be a container for font size inflation!");
+
+  if (aType == IntrinsicISizeType::MinISize) {
+    InlineMinISizeData data;
+    AddInlineMinISize(aContext, &data);
+    data.ForceBreak();
+    return data.mPrevLines;
+  }
+
+  InlinePrefISizeData data;
+  AddInlinePrefISize(aContext, &data);
+  data.ForceBreak();
+  return data.mPrevLines;
 }
 
 nscoord nsIFrame::ComputeISizeValueFromAspectRatio(
