@@ -578,8 +578,15 @@ static void MaybeScheduleReflowSVGNonDisplayText(nsIFrame* aFrame) {
       IntrinsicDirty::FrameAncestorsAndDescendants);
 }
 
-bool nsIFrame::IsPrimaryFrameOfRootOrBodyElement() const {
+bool nsIFrame::ShouldPropagateRepaintsToRoot() const {
   if (!IsPrimaryFrame()) {
+    // special case for table frames because style images are associated to the
+    // table frame, but the table wrapper frame is the primary frame
+    if (IsTableFrame()) {
+      MOZ_ASSERT(GetParent() && GetParent()->IsTableWrapperFrame());
+      return GetParent()->ShouldPropagateRepaintsToRoot();
+    }
+
     return false;
   }
   nsIContent* content = GetContent();
@@ -2401,8 +2408,17 @@ already_AddRefed<ComputedStyle> nsIFrame::ComputeTargetTextStyle() const {
   if (!element) {
     return nullptr;
   }
-  return PresContext()->StyleSet()->ProbePseudoElementStyle(
+  RefPtr pseudoStyle = PresContext()->StyleSet()->ProbePseudoElementStyle(
       *element, PseudoStyleType::targetText, nullptr, Style());
+  if (!pseudoStyle) {
+    return nullptr;
+  }
+  if (PresContext()->ForcingColors() &&
+      pseudoStyle->StyleText()->mForcedColorAdjust !=
+          StyleForcedColorAdjust::None) {
+    return nullptr;
+  }
+  return pseudoStyle.forget();
 }
 
 bool nsIFrame::CanBeDynamicReflowRoot() const {
