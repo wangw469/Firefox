@@ -6468,12 +6468,6 @@
   mirror: once
   do_not_use_directly: true
 
-# Enable OffscreenCanvas everywhere.
-- name: gfx.offscreencanvas.enabled
-  type: RelaxedAtomicBool
-  value: true
-  mirror: always
-
 - name: gfx.offscreencanvas.shared-provider
   type: RelaxedAtomicBool
   value: true
@@ -11311,6 +11305,11 @@
   value: false
   mirror: always
 
+- name: media.test.null.decoder.creation-failure
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # MediaCapture prefs follow
 
 # Enables navigator.mediaDevices and getUserMedia() support. See also
@@ -15754,13 +15753,13 @@
 # See https://svgwg.org/svg2-draft/single-page.html#types-SVGBoundingBoxOptions
 - name: svg.new-getBBox.enabled
   type: bool
-  value: false
+  value: @IS_NIGHTLY_BUILD@
   mirror: always
 
 # Whether SVGGraphicsElement.nearestViewportElement and SVGGraphicsElement.farthestViewportElement are enabled.
 - name: svg.nearestAndFarthestViewportElement.enabled
   type: bool
-  value: @IS_NOT_EARLY_BETA_OR_EARLIER@
+  value: false
   mirror: always
 
 # Whether SVGAElement.text is enabled.
