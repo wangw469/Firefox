@@ -270,6 +270,9 @@ class RestyleManager {
     void Put(nsIContent* aContent, ComputedStyle* aComputedStyle) {
       MOZ_ASSERT(aContent);
       PseudoStyleType pseudoType = aComputedStyle->GetPseudoType();
+      // FIXME: Bug 1922095. Revisit here to make sure we destroy the view
+      // transitions if the associated frames are destroyed. I expect we just
+      // store the view transition pseudo-elements in |mContents|.
       if (pseudoType == PseudoStyleType::NotPseudo) {
         mContents.AppendElement(aContent);
       } else if (pseudoType == PseudoStyleType::before) {
@@ -291,7 +294,7 @@ class RestyleManager {
 
    private:
     void StopAnimationsWithoutFrame(nsTArray<RefPtr<nsIContent>>& aArray,
-                                    PseudoStyleType aPseudoType);
+                                    const PseudoStyleRequest& aPseudoRequest);
 
     RestyleManager* mRestyleManager;
     AutoRestore<AnimationsWithDestroyedFrame*> mRestorePointer;
@@ -319,13 +322,8 @@ class RestyleManager {
   void ContentInserted(nsIContent* aChild);
   void ContentAppended(nsIContent* aFirstNewContent);
 
-  // This would be have the same logic as RestyleForInsertOrChange if we got the
-  // notification before the removal.  However, we get it after, so we need the
-  // following sibling in addition to the old child.
-  //
-  // aFollowingSibling is the sibling that used to come after aOldChild before
-  // the removal.
-  void ContentRemoved(nsIContent* aOldChild, nsIContent* aFollowingSibling);
+  // Restyling for a content removal that is about to happen.
+  void ContentWillBeRemoved(nsIContent* aOldChild);
 
   // Restyling for a ContentInserted (notification after insertion) or
   // for some CharacterDataChanged.
@@ -347,7 +345,7 @@ class RestyleManager {
    * restyling process and this restyle event will be processed in the second
    * traversal of the same restyling process.
    */
-  void PostRestyleEventForAnimations(dom::Element*, PseudoStyleType,
+  void PostRestyleEventForAnimations(dom::Element*, const PseudoStyleRequest&,
                                      RestyleHint);
 
   void NextRestyleIsForCSSRuleChanges() { mRestyleForCSSRuleChanges = true; }

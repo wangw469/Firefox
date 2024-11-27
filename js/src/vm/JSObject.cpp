@@ -1504,14 +1504,10 @@ NativeObject* js::InitClass(JSContext* cx, HandleObject obj,
  * it - e.g. EnqueuePromiseReactionJob - can then unwrap the object and get
  * its global without fear of unwrapping too far.
  */
-bool js::GetObjectFromIncumbentGlobal(JSContext* cx, MutableHandleObject obj) {
-  Rooted<GlobalObject*> globalObj(cx, cx->runtime()->getIncumbentGlobal(cx));
-  if (!globalObj) {
-    obj.set(nullptr);
-    return true;
+bool js::GetObjectFromHostDefinedData(JSContext* cx, MutableHandleObject obj) {
+  if (!cx->runtime()->getHostDefinedData(cx, obj)) {
+    return false;
   }
-
-  obj.set(&globalObj->getObjectPrototype());
 
   // The object might be from a different compartment, so wrap it.
   if (obj && !cx->compartment()->wrap(cx, obj)) {
@@ -2340,6 +2336,15 @@ JS_PUBLIC_API bool js::ShouldIgnorePropertyDefinition(JSContext* cx,
   if (key == JSProto_Function && !JS::Prefs::experimental_joint_iteration() &&
       (id == NameToId(cx->names().zip) ||
        id == NameToId(cx->names().zipKeyed))) {
+    return true;
+  }
+
+  // It's gently surprising that this is JSProto_Function, but the trick
+  // to realize is that this is a -constructor function-, not a function
+  // on the prototype; and the proto of the constructor is JSProto_Function.
+  if (key == JSProto_Function &&
+      !JS::Prefs::experimental_iterator_sequencing() &&
+      id == NameToId(cx->names().concat)) {
     return true;
   }
 

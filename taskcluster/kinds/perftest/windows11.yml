@@ -273,7 +273,6 @@ ml-perf:
         fetch:
             - ort.wasm
             - ort.jsep.wasm
-            - ort-training.wasm
             - xenova-all-minilm-l6-v2
     description: Run ML Models Perf Tests
     treeherder:
@@ -298,7 +297,6 @@ ml-multi-perf:
         fetch:
             - ort.wasm
             - ort.jsep.wasm
-            - ort-training.wasm
             - xenova-all-minilm-l6-v2
             - mozilla-ner
             - mozilla-intent
@@ -325,7 +323,6 @@ ml-perf-suggest-inf:
         fetch:
             - ort.wasm
             - ort.jsep.wasm
-            - ort-training.wasm
             - mozilla-ner
             - mozilla-intent
     description: Run ML Suggest Inference Model
@@ -351,7 +348,6 @@ ml-perf-suggest-int:
         fetch:
             - ort.wasm
             - ort.jsep.wasm
-            - ort-training.wasm
             - mozilla-intent
     description: Run ML Suggest Intent Model
     treeherder:
@@ -376,7 +372,6 @@ ml-perf-suggest-ner:
         fetch:
             - ort.wasm
             - ort.jsep.wasm
-            - ort-training.wasm
             - mozilla-ner
     description: Run ML Suggest NER Model
     treeherder:
@@ -395,3 +390,28 @@ ml-perf-suggest-ner:
             --flavor mochitest
             --output $MOZ_FETCHES_DIR/../artifacts
             toolkit/components/ml/tests/browser/browser_ml_suggest_ner_perf.js
+
+ml-perf-autofill:
+    fetches:
+        fetch:
+            - ort.wasm
+            - ort.jsep.wasm
+            - ort-training.wasm
+            - mozilla-autofill
+    description: Run ML Autofill Model
+    treeherder:
+        symbol: perftest(win-ml-perf-autofill)
+        tier: 2
+    attributes:
+        batch: false
+        cron: false
+    run-on-projects: []
+    run:
+        command: >-
+            mkdir -p $MOZ_FETCHES_DIR/../artifacts &&
+            cd $MOZ_FETCHES_DIR &&
+            python3 python/mozperftest/mozperftest/runner.py
+            --mochitest-binary ${MOZ_FETCHES_DIR}/firefox/firefox.exe
+            --flavor mochitest
+            --output $MOZ_FETCHES_DIR/../artifacts
+            toolkit/components/ml/tests/browser/browser_ml_autofill_perf.js

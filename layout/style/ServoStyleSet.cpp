@@ -1077,13 +1077,15 @@ bool ServoStyleSet::GetKeyframesForName(
 
 nsTArray<ComputedKeyframeValues> ServoStyleSet::GetComputedKeyframeValuesFor(
     const nsTArray<Keyframe>& aKeyframes, Element* aElement,
-    PseudoStyleType aPseudoType, const ComputedStyle* aStyle) {
+    const PseudoStyleRequest& aPseudo, const ComputedStyle* aStyle) {
   nsTArray<ComputedKeyframeValues> result(aKeyframes.Length());
 
   // Construct each nsTArray<PropertyStyleAnimationValuePair> here.
   result.AppendElements(aKeyframes.Length());
 
-  Servo_GetComputedKeyframeValues(&aKeyframes, aElement, aPseudoType, aStyle,
+  // FIXME: Bug 1922095. For view transition pseudo-element, we should just
+  // use the pseudo-element here.
+  Servo_GetComputedKeyframeValues(&aKeyframes, aElement, aPseudo.mType, aStyle,
                                   mRawData.get(), &result);
   return result;
 }
@@ -1440,9 +1442,10 @@ void ServoStyleSet::MaybeInvalidateRelativeSelectorForEmptyDependency(
 }
 
 void ServoStyleSet::MaybeInvalidateRelativeSelectorForNthEdgeDependency(
-    const Element& aElement) {
+    const Element& aElement,
+    StyleRelativeSelectorNthEdgeInvalidateFor aInvalidateFor) {
   Servo_StyleSet_MaybeInvalidateRelativeSelectorNthEdgeDependency(
-      mRawData.get(), &aElement);
+      mRawData.get(), &aElement, aInvalidateFor);
 }
 
 void ServoStyleSet::MaybeInvalidateRelativeSelectorForNthDependencyFromSibling(
@@ -1466,10 +1469,9 @@ void ServoStyleSet::MaybeInvalidateForElementAppend(
                                                           &aFirstContent);
 }
 
-void ServoStyleSet::MaybeInvalidateForElementRemove(
-    const Element& aElement, const nsIContent* aFollowingSibling) {
-  Servo_StyleSet_MaybeInvalidateRelativeSelectorForRemoval(
-      mRawData.get(), &aElement, aFollowingSibling);
+void ServoStyleSet::MaybeInvalidateForElementRemove(const Element& aElement) {
+  Servo_StyleSet_MaybeInvalidateRelativeSelectorForRemoval(mRawData.get(),
+                                                           &aElement);
 }
 
 bool ServoStyleSet::MightHaveNthOfAttributeDependency(

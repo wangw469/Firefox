@@ -391,6 +391,24 @@ toolkit/components/ml/tests/browser
 -----------------------------------
 Performance tests running through Mochitest for ML Models
 
+browser_ml_autofill_perf.js
+===========================
+
+:owner: GenAI Team
+:name: ML Autofill Model
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:AUTOFILL-pipeline-ready-latency,unit:ms,shouldAlert:True, name:AUTOFILL-initialization-latency,unit:ms,shouldAlert:True, name:AUTOFILL-model-run-latency,unit:ms,shouldAlert:True, name:AUTOFILL-pipeline-ready-memory,unit:MB,shouldAlert:True, name:AUTOFILL-initialization-memory,unit:MB,shouldAlert:True, name:AUTOFILL-model-run-memory,unit:MB,shouldAlert:True, name:AUTOFILL-total-memory-usage,unit:MB,shouldAlert:True
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Template test for latency for ML Autofill model**
+
 browser_ml_suggest_inference.js
 ===============================
 
@@ -419,7 +437,7 @@ browser_ml_suggest_intent_perf.js
 ::
 
  --perfherder
- --perfherder-metrics name:intent-pipeline-ready-latency,unit:ms,shouldAlert:True, name:intent-initialization-latency,unit:ms,shouldAlert:True, name:intent-model-run-latency,unit:ms,shouldAlert:True, name:intent-pipeline-ready-memory,unit:MB,shouldAlert:True, name:intent-initialization-memory,unit:MB,shouldAlert:True, name:intent-model-run-memory,unit:MB,shouldAlert:True, name:intent-total-memory-usage,unit:MB,shouldAlert:True
+ --perfherder-metrics name:INTENT-pipeline-ready-latency,unit:ms,shouldAlert:True, name:INTENT-initialization-latency,unit:ms,shouldAlert:True, name:INTENT-model-run-latency,unit:ms,shouldAlert:True, name:INTENT-pipeline-ready-memory,unit:MB,shouldAlert:True, name:INTENT-initialization-memory,unit:MB,shouldAlert:True, name:INTENT-model-run-memory,unit:MB,shouldAlert:True, name:INTENT-total-memory-usage,unit:MB,shouldAlert:True
  --verbose
  --manifest perftest.toml
  --manifest-flavor browser-chrome

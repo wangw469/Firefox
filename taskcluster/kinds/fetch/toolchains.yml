@@ -241,11 +241,11 @@ ldid:
         revision: 4bf8f4d60384a0693dbbe2084ce62a35bfeb87ab
 
 libdmg-hfsplus:
-    description: libdmg-hfsplug source code
+    description: libdmg-hfsplus source code
     fetch:
         type: git
         repo: https://github.com/mozilla/libdmg-hfsplus/
-        revision: a0a959bd25370c1c0a00c9ec525e3e78285adbf9
+        revision: 95357fa65c04217a9ee4d6157692e5491872f511
 
 hfsplus-tools:
     description: hfstools-plus source code
@@ -311,7 +311,7 @@ mingw-w64:
     fetch:
         type: git
         repo: https://git.code.sf.net/p/mingw-w64/mingw-w64
-        revision: cd4cf9b279f8fb0815f8b9665d3cea60a30290bc
+        revision: c0313ec3381521db6c5e3aca746ff1e3e29208d7
 
 mingw-w64-trunk:
     description: mingw-w64 master branch source code
