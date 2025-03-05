@@ -507,13 +507,13 @@ MSG_DEF(JSMSG_WASM_MISSING_REQUIRED,   1, JSEXN_TYPEERR,     "Missing required a
 MSG_DEF(JSMSG_WASM_MODIFIED_GC_OBJECT,   0, JSEXN_TYPEERR,     "can't modify WebAssembly GC objects")
 
 // JSPI
-MSG_DEF(JSMSG_JSPI_ARG_POSITION,       0, JSEXN_TYPEERR,              "Invalid argument position value")
-MSG_DEF(JSMSG_JSPI_INVALID_SUSPENDER,  0, JSEXN_WASMRUNTIMEERROR,     "Invalid suspender")
-MSG_DEF(JSMSG_JSPI_INVALID_STATE,      0, JSEXN_WASMRUNTIMEERROR,     "Invalid state")
-MSG_DEF(JSMSG_JSPI_EXPECTED_SUSPENDER, 0, JSEXN_TYPEERR,              "Expected externref for suspender")
-MSG_DEF(JSMSG_JSPI_EXPECTED_PROMISE,   0, JSEXN_TYPEERR,              "Expected externref for returned promise")
-MSG_DEF(JSMSG_JSPI_SIGNATURE_MISMATCH, 0, JSEXN_TYPEERR,              "Signature mismatch")
-MSG_DEF(JSMSG_JSPI_SUSPENDER_LIMIT,    0, JSEXN_WASMRUNTIMEERROR,     "Too many suspenders")
+MSG_DEF(JSMSG_JSPI_ARG_POSITION,       0, JSEXN_TYPEERR, "Invalid argument position value")
+MSG_DEF(JSMSG_JSPI_INVALID_SUSPENDER,  0, IF_WASM_JSPI(JSEXN_WASMSUSPENDERROR, JSEXN_WASMRUNTIMEERROR), "Invalid suspender")
+MSG_DEF(JSMSG_JSPI_INVALID_STATE,      0, IF_WASM_JSPI(JSEXN_WASMSUSPENDERROR, JSEXN_WASMRUNTIMEERROR), "Invalid state")
+MSG_DEF(JSMSG_JSPI_EXPECTED_SUSPENDER, 0, JSEXN_TYPEERR, "Expected externref for suspender")
+MSG_DEF(JSMSG_JSPI_EXPECTED_PROMISE,   0, JSEXN_TYPEERR, "Expected externref for returned promise")
+MSG_DEF(JSMSG_JSPI_SIGNATURE_MISMATCH, 0, JSEXN_TYPEERR, "Signature mismatch")
+MSG_DEF(JSMSG_JSPI_SUSPENDER_LIMIT,    0, IF_WASM_JSPI(JSEXN_WASMSUSPENDERROR, JSEXN_WASMRUNTIMEERROR), "Too many suspenders")
 
 // Proxy
 MSG_DEF(JSMSG_BAD_GETPROTOTYPEOF_TRAP_RETURN,0,JSEXN_TYPEERR,"proxy getPrototypeOf handler returned a non-object, non-null value")
@@ -881,7 +881,7 @@ MSG_DEF(JSMSG_TEMPORAL_INVALID_UNIT_RANGE,          0, JSEXN_RANGEERR, "smallest
 MSG_DEF(JSMSG_TEMPORAL_INVALID_UNIT_OPTION,         2, JSEXN_RANGEERR, "{0} is not a valid {1} option in this context")
 MSG_DEF(JSMSG_TEMPORAL_INVALID_NUMBER,              1, JSEXN_RANGEERR, "{0} must be larger than zero")
 MSG_DEF(JSMSG_TEMPORAL_INVALID_INTEGER,             1, JSEXN_RANGEERR, "{0} must be an integer")
-MSG_DEF(JSMSG_TEMPORAL_MISSING_OPTION,              1, JSEXN_RANGEERR, "undefined {0} option")
+MSG_DEF(JSMSG_TEMPORAL_MISSING_OPTION,              1, JSEXN_RANGEERR, "required option {0} is undefined")
 MSG_DEF(JSMSG_TEMPORAL_MISSING_PROPERTY,            1, JSEXN_TYPEERR, "{0} property is undefined")
 MSG_DEF(JSMSG_TEMPORAL_UNEXPECTED_PROPERTY,         1, JSEXN_TYPEERR, "expected property {0} to be undefined")
 MSG_DEF(JSMSG_TEMPORAL_MISSING_TEMPORAL_FIELDS,     0, JSEXN_TYPEERR, "object must have at least one temporal property")

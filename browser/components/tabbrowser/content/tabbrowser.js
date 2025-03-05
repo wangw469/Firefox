@@ -106,9 +106,11 @@
       );
 
       ChromeUtils.defineESModuleGetters(this, {
-        AsyncTabSwitcher: "resource:///modules/AsyncTabSwitcher.sys.mjs",
+        AsyncTabSwitcher:
+          "moz-src:///browser/components/tabbrowser/AsyncTabSwitcher.sys.mjs",
         PictureInPicture: "resource://gre/modules/PictureInPicture.sys.mjs",
-        SmartTabGroupingManager: "resource:///modules/SmartTabGrouping.sys.mjs",
+        SmartTabGroupingManager:
+          "moz-src:///browser/components/tabbrowser/SmartTabGrouping.sys.mjs",
         UrlbarProviderOpenTabs:
           "resource:///modules/UrlbarProviderOpenTabs.sys.mjs",
       });
@@ -2917,8 +2919,14 @@
      *   An optional argument that accepts a single tab, which, if passed, will
      *   cause the group to be inserted just before this tab in the tab strip. By
      *   default, the group will be created at the end of the tab strip.
-     * @param {boolean} [options.showCreateUI]
-     *   Set this to true to show the post-creation group edtior.
+     * @param {boolean} [options.isUserCreated]
+     *   Should be true if this group is being created in response to an
+     *   explicit request from the user (as opposed to a group being created
+     *   for technical reasons, such as when an already existing group
+     *   switches windows).
+     *   Causes the group create UI to be displayed and telemetry events to be fired.
+     * @param {string} [options.telemetryUserCreateSource]
+     *   The means by which the tab group was created. Defaults to "unknown".
      */
     addTabGroup(
       tabs,
@@ -2927,7 +2935,8 @@
         color = null,
         label = "",
         insertBefore = null,
-        showCreateUI = false,
+        isUserCreated = false,
+        telemetryUserCreateSource = "unknown",
       } = {}
     ) {
       if (!tabs?.length) {
@@ -2973,9 +2982,18 @@
       group.dispatchEvent(
         new CustomEvent("TabGroupCreate", {
           bubbles: true,
-          detail: { showCreateUI },
+          detail: { isUserCreated },
         })
       );
+
+      if (isUserCreated) {
+        Glean.browserEngagement.tabGroupCreate.record({
+          id,
+          layout: this.tabContainer.verticalMode ? "vertical" : "horizontal",
+          source: telemetryUserCreateSource,
+          tabs: group.tabs.length,
+        });
+      }
 
       return group;
     }
@@ -6702,7 +6720,7 @@
           break;
         }
         case "TabGroupCreate":
-          if (aEvent.detail.showCreateUI) {
+          if (aEvent.detail.isUserCreated) {
             this.tabGroupMenu.openCreateModal(aEvent.target);
           }
           break;
@@ -8295,62 +8313,67 @@ var TabBarVisibility = {
   _initialUpdateDone: false,
 
   update(force = false) {
-    let toolbar = document.getElementById("TabsToolbar");
-    let navbar = document.getElementById("nav-bar");
-    let hideTabstrip = false;
     let isPopup = !window.toolbar.visible;
-    let isVerticalTabs = Services.prefs.getBoolPref(
-      "sidebar.verticalTabs",
-      false
-    );
-    let nonPopupWithVerticalTabs = !isPopup && isVerticalTabs;
-    if (
-      !gBrowser /* gBrowser isn't initialized yet */ ||
-      gBrowser.visibleTabs.length == 1
-    ) {
-      hideTabstrip = isPopup;
-    }
+    let isTaskbarTab = document.documentElement.hasAttribute("taskbartab");
+    let isSingleTabWindow = isPopup || isTaskbarTab;
 
-    if (nonPopupWithVerticalTabs) {
-      // CustomTitlebar decides if we can draw within the titlebar area.
-      // In vertical tabs mode, the toolbar with the horizontal tabstrip gets hidden
-      // and the navbar becomes a titlebar.
-      hideTabstrip = true;
-      CustomTitlebar.allowedBy("tabs-visible", true);
-    } else {
-      CustomTitlebar.allowedBy("tabs-visible", !hideTabstrip);
-    }
+    let hasVerticalTabs =
+      !isSingleTabWindow &&
+      Services.prefs.getBoolPref("sidebar.verticalTabs", false);
 
-    gNavToolbox.toggleAttribute("tabs-hidden", hideTabstrip);
+    // When `gBrowser` has not been initialized, we're opening a new window and
+    // assume only a single tab is loading.
+    let hasSingleTab = !gBrowser || gBrowser.visibleTabs.length == 1;
+
+    // To prevent tabs being lost, hiding the tabs toolbar should only work
+    // when only a single tab is visible or tabs are displayed elsewhere.
+    let hideTabsToolbar =
+      (isSingleTabWindow && hasSingleTab) || hasVerticalTabs;
+
+    // We only want a non-customized titlebar for popups. It should not be the
+    // case, but if a popup window contains more than one tab we re-enable
+    // titlebar customization and display tabs.
+    CustomTitlebar.allowedBy("non-popup", !(isPopup && hasSingleTab));
+
+    // Update the browser chrome.
+
+    let tabsToolbar = document.getElementById("TabsToolbar");
+    let navbar = document.getElementById("nav-bar");
+
+    gNavToolbox.toggleAttribute("tabs-hidden", hideTabsToolbar);
     // Should the nav-bar look and function like a titlebar?
     navbar.classList.toggle(
       "browser-titlebar",
-      CustomTitlebar.enabled && hideTabstrip
+      CustomTitlebar.enabled && hideTabsToolbar
     );
 
     document
       .getElementById("browser")
       .classList.toggle(
         "browser-toolbox-background",
-        CustomTitlebar.enabled && nonPopupWithVerticalTabs
+        CustomTitlebar.enabled && hasVerticalTabs
       );
 
     if (
-      hideTabstrip == toolbar.collapsed &&
+      hideTabsToolbar == tabsToolbar.collapsed &&
       !force &&
       this._initialUpdateDone
     ) {
-      // no further updates needed, toolbar.collapsed already matches hideTabstrip
+      // No further updates needed, `TabsToolbar` already matches the expected
+      // visibilty.
       return;
     }
     this._initialUpdateDone = true;
 
-    toolbar.collapsed = hideTabstrip;
+    tabsToolbar.collapsed = hideTabsToolbar;
 
-    document.getElementById("menu_closeWindow").hidden = hideTabstrip;
+    // Stylize close menu items based on tab visibility. When a window will only
+    // ever have a single tab, only show the option to close the tab, and
+    // simplify the text since we don't need to disambiguate from closing the window.
+    document.getElementById("menu_closeWindow").hidden = hideTabsToolbar;
     document.l10n.setAttributes(
       document.getElementById("menu_close"),
-      hideTabstrip
+      hideTabsToolbar
         ? "tabbrowser-menuitem-close"
         : "tabbrowser-menuitem-close-tab"
     );
@@ -8442,7 +8465,7 @@ var TabContextMenu = {
     if (gBrowser._tabGroupsEnabled) {
       let groupableTabs = this.contextTabs.filter(t => !t.pinned);
       let selectedGroupCount = new Set(
-        // the filter is necessary to remove the "null" group
+        // The filter removes the "null" group for ungrouped tabs.
         groupableTabs.map(t => t.group).filter(g => g)
       ).size;
 
@@ -8454,14 +8477,13 @@ var TabContextMenu = {
 
       // Determine whether or not the "current" tab group should appear in the
       // "move tab to group" context menu.
-      let groupToFilter;
       if (selectedGroupCount == 1) {
-        groupToFilter = groupableTabs[0].group;
-      }
-      if (groupToFilter) {
-        availableGroupsToMoveTo = availableGroupsToMoveTo.filter(
-          group => group !== groupToFilter
-        );
+        let groupToFilter = groupableTabs[0].group;
+        if (groupToFilter && groupableTabs.every(t => t.group)) {
+          availableGroupsToMoveTo = availableGroupsToMoveTo.filter(
+            group => group !== groupToFilter
+          );
+        }
       }
 
       contextMoveTabToGroup.disabled = !groupableTabs.length;
@@ -8838,7 +8860,8 @@ var TabContextMenu = {
   moveTabsToNewGroup() {
     gBrowser.addTabGroup(this.contextTabs, {
       insertBefore: this.contextTab,
-      showCreateUI: true,
+      isUserCreated: true,
+      telemetryUserCreateSource: "tab_menu",
     });
 
     // When using the tab context menu to create a group from the all tabs

@@ -220,7 +220,6 @@
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/Types.h"
 #include "mozilla/ipc/ProtocolUtils.h"
-#include "mozilla/ipc/SharedMemory.h"
 #include "mozilla/net/UrlClassifierCommon.h"
 #include "mozilla/Tokenizer.h"
 #include "mozilla/widget/IMEData.h"
@@ -944,20 +943,14 @@ static constexpr nsLiteralCString kRfpPrefs[] = {
 };
 
 static void RecomputeResistFingerprintingAllDocs(const char*, void*) {
-  AutoTArray<RefPtr<BrowsingContextGroup>, 5> bcGroups;
-  BrowsingContextGroup::GetAllGroups(bcGroups);
-  for (auto& bcGroup : bcGroups) {
-    AutoTArray<DocGroup*, 5> docGroups;
-    bcGroup->GetDocGroups(docGroups);
-    for (auto* docGroup : docGroups) {
-      for (Document* doc : *docGroup) {
-        if (doc->RecomputeResistFingerprinting()) {
-          if (auto* pc = doc->GetPresContext()) {
-            pc->MediaFeatureValuesChanged(
-                {MediaFeatureChangeReason::PreferenceChange},
-                MediaFeatureChangePropagation::JustThisDocument);
-          }
-        }
+  AutoTArray<RefPtr<Document>, 64> allDocuments;
+  Document::GetAllInProcessDocuments(allDocuments);
+  for (auto& doc : allDocuments) {
+    if (doc->RecomputeResistFingerprinting()) {
+      if (auto* pc = doc->GetPresContext()) {
+        pc->MediaFeatureValuesChanged(
+            {MediaFeatureChangeReason::PreferenceChange},
+            MediaFeatureChangePropagation::JustThisDocument);
       }
     }
   }
@@ -2957,16 +2950,22 @@ bool nsContentUtils::ContentIsHostIncludingDescendantOf(
   MOZ_ASSERT(aPossibleDescendant, "The possible descendant is null!");
   MOZ_ASSERT(aPossibleAncestor, "The possible ancestor is null!");
 
-  do {
-    if (aPossibleDescendant == aPossibleAncestor) return true;
-    if (aPossibleDescendant->IsDocumentFragment()) {
-      aPossibleDescendant =
-          aPossibleDescendant->AsDocumentFragment()->GetHost();
-    } else {
-      aPossibleDescendant = aPossibleDescendant->GetParentNode();
+  while (true) {
+    if (aPossibleDescendant == aPossibleAncestor) {
+      return true;
     }
-  } while (aPossibleDescendant);
-
+    if (nsINode* parent = aPossibleDescendant->GetParentNode()) {
+      aPossibleDescendant = parent;
+      continue;
+    }
+    if (auto* df = DocumentFragment::FromNode(aPossibleDescendant)) {
+      if (nsINode* host = df->GetHost()) {
+        aPossibleDescendant = host;
+        continue;
+      }
+    }
+    break;
+  }
   return false;
 }
 

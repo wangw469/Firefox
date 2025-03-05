@@ -905,7 +905,7 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "MouseScrollEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "MutationEvent", insecureContext: true },
+  { name: "MutationEvent", insecureContext: true, nightly: false },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "MutationObserver", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1934,6 +1934,8 @@ let interfaceNamesInGlobalScope = [
   { name: "orientation", insecureContext: true, android: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "origin", insecureContext: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "originAgentCluster", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "outerHeight", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!

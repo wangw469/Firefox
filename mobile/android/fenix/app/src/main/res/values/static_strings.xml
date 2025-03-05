@@ -79,6 +79,8 @@
     <string name="preferences_debug_settings_compose_homepage" translatable="false">Enable Compose Homepage</string>
     <!-- Label for enabling the Compose Bookmarks -->
     <string name="preferences_debug_settings_compose_bookmarks" translatable="false">Enable Compose Bookmarks</string>
+    <!-- Label for enabling the Homepage Search Bar -->
+    <string name="preferences_debug_settings_homepage_searchbar" translatable="false">Enable Homepage Search Bar</string>
     <!-- Label for enabling Homepage as a New Tab -->
     <string name="preferences_debug_settings_homepage_as_new_tab" translatable="false">Enable Homepage as a New Tab</string>
     <!-- Label for enabling MARS API integration -->
@@ -103,6 +105,8 @@
     <string name="preferences_debug_settings_unified_trust_panel" translatable="false">Enable Unified Trust Panel</string>
     <!-- Label for enabling Trending Searches -->
     <string name="preferences_debug_settings_trending_searches" translatable="false">Enable Trending Searches</string>
+    <!-- Label for enabling Recent Searches -->
+    <string name="preferences_debug_settings_recent_searches" translatable="false">Enable Recent Searches</string>
 
     <!-- Label for enabling the DNS over HTTPS settings -->
     <string name="preferences_debug_settings_enable_doh_settings" translatable="false">Enable DNS over HTTPS settings</string>
@@ -117,6 +121,7 @@
     <string name="debug_info_region_home" translatable="false">Home region</string>
     <string name="debug_info_region_current" translatable="false">Current region</string>
     <string name="debug_info_distribution_id" translatable="false">Distribution ID</string>
+    <string name="debug_info_play_referrer" translatable="false">Play install referrer</string>
 
     <!-- Profiler settings -->
     <string name="preferences_start_profiler">Start Profiler</string>

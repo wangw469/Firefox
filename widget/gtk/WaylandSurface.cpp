@@ -139,6 +139,8 @@ void WaylandSurface::InitialFrameCallbackHandler(struct wl_callback* callback) {
     }
     mIsReadyToDraw = true;
     cbs = std::move(mReadToDrawCallbacks);
+
+    RequestFrameCallbackLocked(lock);
   }
 
   // We can't call the callbacks under lock
@@ -148,16 +150,6 @@ void WaylandSurface::InitialFrameCallbackHandler(struct wl_callback* callback) {
   for (auto const& cb : cbs) {
     LOGWAYLAND("  initial callback fire  [%d]", callbackNum++);
     cb();
-  }
-
-  // If there's any frame callback waiting, register the handler now to fire
-  // them
-  if (!mPersistentFrameCallbackHandlers.empty() ||
-      !mOneTimeFrameCallbackHandlers.empty()) {
-    LOGWAYLAND("  initial callback: Register regular frame callback");
-    WaylandSurfaceLock lock(this);
-    RequestFrameCallbackLocked(lock,
-                               IsEmulatedFrameCallbackPendingLocked(lock));
   }
 }
 
@@ -221,11 +213,8 @@ void WaylandSurface::ClearReadyToDrawCallbacks() {
   ClearReadyToDrawCallbacksLocked(lock);
 }
 
-bool WaylandSurface::IsEmulatedFrameCallbackPendingLocked(
+bool WaylandSurface::HasEmulatedFrameCallbackLocked(
     const WaylandSurfaceLock& aProofOfLock) const {
-  if (mBufferAttached) {
-    return false;
-  }
   for (auto const& cb : mPersistentFrameCallbackHandlers) {
     if (cb.mEmulated) {
       return true;
@@ -253,10 +242,10 @@ void WaylandSurface::FrameCallbackHandler(struct wl_callback* aCallback,
 
     LOGVERBOSE(
         "WaylandSurface::FrameCallbackHandler() one-time %zd "
-        "persistent %zd emulated %d routed %d force commit %d",
+        "persistent %zd emulated %d routed %d",
         mOneTimeFrameCallbackHandlers.size(),
         mPersistentFrameCallbackHandlers.size(), emulatedCallback,
-        aRoutedFromChildSurface, mFrameCallbackForceCommit);
+        aRoutedFromChildSurface);
 
     // It's possible to get regular frame callback right after unmap
     // if frame callbacks was already in event queue so ignore it.
@@ -283,6 +272,9 @@ void WaylandSurface::FrameCallbackHandler(struct wl_callback* aCallback,
     }
     std::copy(mPersistentFrameCallbackHandlers.begin(),
               mPersistentFrameCallbackHandlers.end(), back_inserter(cbs));
+
+    // Fire frame callback again if there's any pending frame callback
+    RequestFrameCallbackLocked(lock);
   }
 
   // We can't run the callbacks under WaylandSurfaceLock
@@ -296,18 +288,6 @@ void WaylandSurface::FrameCallbackHandler(struct wl_callback* aCallback,
       continue;
     }
     callback(aCallback, aTime);
-  }
-
-  // Fire frame callback again if there's any pending frame callback
-  if (!mPersistentFrameCallbackHandlers.empty() ||
-      !mOneTimeFrameCallbackHandlers.empty()) {
-    WaylandSurfaceLock lock(this, mFrameCallbackForceCommit);
-    bool enableCallbackEmulation = emulatedCallback || aRoutedFromChildSurface;
-    RequestFrameCallbackLocked(
-        lock,
-        enableCallbackEmulation && IsEmulatedFrameCallbackPendingLocked(lock));
-  } else if (mFrameCallbackForceCommit) {
-    WaylandSurfaceLock lock(this, /* force commit */ true);
   }
 }
 
@@ -323,12 +303,11 @@ static const struct wl_callback_listener sWaylandSurfaceFrameListener = {
     ::FrameCallbackHandler};
 
 void WaylandSurface::RequestFrameCallbackLocked(
-    const WaylandSurfaceLock& aProofOfLock, bool aRequestEmulated) {
+    const WaylandSurfaceLock& aProofOfLock) {
   LOGVERBOSE(
       "WaylandSurface::RequestFrameCallbackLocked(), enabled %d mapped %d "
-      "emulate "
-      "%d mFrameCallback %d",
-      mFrameCallbackEnabled, !!mIsMapped, aRequestEmulated, !!mFrameCallback);
+      " mFrameCallback %d",
+      mFrameCallbackEnabled, !!mIsMapped, !!mFrameCallback);
 
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
 
@@ -341,6 +320,11 @@ void WaylandSurface::RequestFrameCallbackLocked(
     return;
   }
 
+  if (mPersistentFrameCallbackHandlers.empty() &&
+      mOneTimeFrameCallbackHandlers.empty()) {
+    return;
+  }
+
   MOZ_DIAGNOSTIC_ASSERT(mSurface, "Missing mapped surface!");
 
   if (!mFrameCallback) {
@@ -350,8 +334,12 @@ void WaylandSurface::RequestFrameCallbackLocked(
     mSurfaceNeedsCommit = true;
   }
 
-  // Emulate callbacks for empty wl_surfaces only
-  if (aRequestEmulated && !mBufferAttached && !mEmulatedFrameCallbackTimerID) {
+  // Request frame callback emulation if:
+  // - we have registered any emulated frame callbacks
+  // - we don't have buffer attached so we can't get regular frame callback
+  // - emulated frame callback is not already pending
+  if (HasEmulatedFrameCallbackLocked(aProofOfLock) && !mBufferAttached &&
+      !mEmulatedFrameCallbackTimerID) {
     LOGVERBOSE(
         "WaylandSurface::RequestFrameCallbackLocked() emulated, schedule "
         "next check");
@@ -401,7 +389,7 @@ void WaylandSurface::AddOneTimeFrameCallbackLocked(
 
   mOneTimeFrameCallbackHandlers.push_back(
       FrameCallback{aFrameCallbackHandler, false});
-  RequestFrameCallbackLocked(aProofOfLock, /* aEmulateFrameCallback */ false);
+  RequestFrameCallbackLocked(aProofOfLock);
 }
 
 void WaylandSurface::AddPersistentFrameCallbackLocked(
@@ -413,7 +401,7 @@ void WaylandSurface::AddPersistentFrameCallbackLocked(
 
   mPersistentFrameCallbackHandlers.push_back(
       FrameCallback{aFrameCallbackHandler, aEmulateFrameCallback});
-  RequestFrameCallbackLocked(aProofOfLock, aEmulateFrameCallback);
+  RequestFrameCallbackLocked(aProofOfLock);
 }
 
 void WaylandSurface::SetFrameCallbackState(bool aEnabled) {
@@ -427,11 +415,7 @@ void WaylandSurface::SetFrameCallbackState(bool aEnabled) {
 
   // If there's any frame callback waiting, register the handler.
   if (mFrameCallbackEnabled) {
-    if (!mPersistentFrameCallbackHandlers.empty() ||
-        !mOneTimeFrameCallbackHandlers.empty()) {
-      RequestFrameCallbackLocked(lock,
-                                 IsEmulatedFrameCallbackPendingLocked(lock));
-    }
+    RequestFrameCallbackLocked(lock);
   } else {
     ClearFrameCallbackLocked(lock);
   }
@@ -490,7 +474,7 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
                                wl_surface* aParentWLSurface,
                                WaylandSurfaceLock* aParentWaylandSurfaceLock,
                                gfx::IntPoint aSubsurfacePosition,
-                               bool aCommitToParent, bool aSubsurfaceDesync,
+                               bool aSubsurfaceDesync,
                                bool aUseReadyToDrawCallback) {
   LOGWAYLAND("WaylandSurface::MapLocked()");
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
@@ -508,19 +492,7 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
     mParentSurface = mParent->mSurface;
   }
 
-  mCommitToParentSurface = aCommitToParent;
   mSubsurfacePosition = aSubsurfacePosition;
-
-  if (mCommitToParentSurface) {
-    LOGWAYLAND("    commit to parent");
-    mIsMapped = true;
-    mSurface = mParentSurface;
-    NS_DispatchToCurrentThread(NS_NewRunnableFunction(
-        "InitialFrameCallbackHandler", [self = RefPtr{this}]() {
-          self->InitialFrameCallbackHandler(nullptr);
-        }));
-    return true;
-  }
 
   // Created wl_surface is without buffer attached
   mBufferAttached = false;
@@ -552,13 +524,8 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
                wl_proxy_get_id((struct wl_proxy*)mReadyToDrawFrameCallback));
   }
 
-  // If there's any frame callback waiting, register the handler.
-  if (!mPersistentFrameCallbackHandlers.empty() ||
-      !mOneTimeFrameCallbackHandlers.empty()) {
-    LOGWAYLAND("  register frame callback");
-    RequestFrameCallbackLocked(
-        aProofOfLock, IsEmulatedFrameCallbackPendingLocked(aProofOfLock));
-  }
+  LOGWAYLAND("  register frame callback");
+  RequestFrameCallbackLocked(aProofOfLock);
 
   CommitLocked(aProofOfLock, /* aForceCommit */ true,
                /* aForceDisplayFlush */ true);
@@ -576,10 +543,8 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
 
 bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
                                wl_surface* aParentWLSurface,
-                               gfx::IntPoint aSubsurfacePosition,
-                               bool aCommitToParent) {
+                               gfx::IntPoint aSubsurfacePosition) {
   return MapLocked(aProofOfLock, aParentWLSurface, nullptr, aSubsurfacePosition,
-                   aCommitToParent,
                    /* aSubsurfaceDesync */ true);
 }
 
@@ -588,8 +553,7 @@ bool WaylandSurface::MapLocked(const WaylandSurfaceLock& aProofOfLock,
                                gfx::IntPoint aSubsurfacePosition) {
   return MapLocked(aProofOfLock, nullptr, aParentWaylandSurfaceLock,
                    aSubsurfacePosition,
-                   /* aCommitToParent */ false,
-                   /* aSubsurfaceDesync */ true,
+                   /* aSubsurfaceDesync */ false,
                    /* aUseReadyToDrawCallback */ false);
 }
 
@@ -636,15 +600,6 @@ void WaylandSurface::UnmapLocked(WaylandSurfaceLock& aSurfaceLock) {
   mIsMapped = false;
 
   LOGWAYLAND("WaylandSurface::UnmapLocked()");
-
-  // If mCommitToParentSurface is set, mSurface may be already deleted as
-  // unamp/hide Gtk handler is called before us and we can't do anything
-  // with it (at least I don't know how to override it).
-  // So make it cleat and don't use it.
-  // It doesn't matter much as we use direct rendering for D&D popups only.
-  if (mCommitToParentSurface) {
-    mSurface = nullptr;
-  }
 
   ClearReadyToDrawCallbacksLocked(aSurfaceLock);
   ClearFrameCallbackLocked(aSurfaceLock);
@@ -704,7 +659,7 @@ void WaylandSurface::MoveLocked(const WaylandSurfaceLock& aProofOfLock,
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
   MOZ_DIAGNOSTIC_ASSERT(mIsMapped);
 
-  if (mSubsurfacePosition == aPosition || mCommitToParentSurface) {
+  if (mSubsurfacePosition == aPosition) {
     return;
   }
 
@@ -1099,16 +1054,9 @@ void WaylandSurface::InvalidateRegionLocked(
   MOZ_DIAGNOSTIC_ASSERT(&aProofOfLock == mSurfaceLock);
   MOZ_DIAGNOSTIC_ASSERT(mSurface);
 
-  if (mCommitToParentSurface) {
-    // When committing to parent surface we must use wl_surface_damage().
-    // A parent surface is created as v.3 object which does not support
-    // wl_surface_damage_buffer().
-    wl_surface_damage(mSurface, 0, 0, INT32_MAX, INT32_MAX);
-  } else {
-    for (auto iter = aInvalidRegion.RectIter(); !iter.Done(); iter.Next()) {
-      gfx::IntRect r = iter.Get();
-      wl_surface_damage_buffer(mSurface, r.x, r.y, r.width, r.height);
-    }
+  for (auto iter = aInvalidRegion.RectIter(); !iter.Done(); iter.Next()) {
+    gfx::IntRect r = iter.Get();
+    wl_surface_damage_buffer(mSurface, r.x, r.y, r.width, r.height);
   }
   mSurfaceNeedsCommit = true;
 }
@@ -1211,9 +1159,6 @@ bool WaylandSurface::AttachLocked(WaylandSurfaceLock& aSurfaceLock,
     mAttachedBuffers.AppendElement(aWaylandBuffer);
   }
 
-  if (mCommitToParentSurface) {
-    wl_surface_set_buffer_scale(mSurface, 1);
-  }
   wl_surface_attach(mSurface, buffer, 0, 0);
   aWaylandBuffer->SetAttachedLocked(aSurfaceLock);
   mBufferAttached = true;

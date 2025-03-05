@@ -137,7 +137,7 @@ pub extern "C" fn wgpu_server_new(owner: *mut c_void, use_dxc: bool) -> *mut Glo
         wgt::Dx12Compiler::DynamicDxc {
             dxc_path: "dxcompiler.dll".into(),
             dxil_path: "dxil.dll".into(),
-            max_shader_model: wgt::DxcShaderModel::V6_6
+            max_shader_model: wgt::DxcShaderModel::V6_6,
         }
     } else {
         wgt::Dx12Compiler::Fxc
@@ -2525,6 +2525,119 @@ pub struct SubmittedWorkDoneClosure {
 }
 unsafe impl Send for SubmittedWorkDoneClosure {}
 
+#[derive(Debug)]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub struct VkSemaphoreHandle {
+    pub semaphore: vk::Semaphore,
+}
+
+#[allow(dead_code)]
+fn emit_critical_invalid_note_if_none<T>(what: &'static str, t: Option<T>) -> Option<T> {
+    if t.is_none() {
+        // SAFETY: We ensure that the pointer provided is not null.
+        let msg = CString::new(format!("{what} is invalid")).unwrap();
+        unsafe { gfx_critical_note(msg.as_ptr()) }
+    }
+    t
+}
+
+#[no_mangle]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub extern "C" fn wgpu_vksemaphore_create_signal_semaphore(
+    global: &Global,
+    queue_id: id::QueueId,
+) -> *mut VkSemaphoreHandle {
+    let semaphore_handle = unsafe {
+        global.queue_as_hal::<wgc::api::Vulkan, _, Option<VkSemaphoreHandle>>(
+            queue_id,
+            |hal_queue| {
+                let hal_queue = emit_critical_invalid_note_if_none("Vulkan queue", hal_queue)?;
+                let device = hal_queue.raw_device();
+
+                let mut export_semaphore_create_info = vk::ExportSemaphoreCreateInfo::default()
+                    .handle_types(vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_FD);
+                let create_info =
+                    vk::SemaphoreCreateInfo::default().push_next(&mut export_semaphore_create_info);
+                let semaphore = match device.create_semaphore(&create_info, None) {
+                    Err(err) => {
+                        let msg =
+                            CString::new(format!("create_semaphore() failed: {:?}", err)).unwrap();
+                        gfx_critical_note(msg.as_ptr());
+                        return None;
+                    }
+                    Ok(semaphore) => semaphore,
+                };
+
+                hal_queue.add_signal_semaphore(semaphore, None);
+
+                Some(VkSemaphoreHandle { semaphore })
+            },
+        )
+    };
+
+    match semaphore_handle {
+        None => ptr::null_mut(),
+        Some(semaphore_handle) => Box::into_raw(Box::new(semaphore_handle)),
+    }
+}
+
+#[no_mangle]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub unsafe extern "C" fn wgpu_vksemaphore_get_file_descriptor(
+    global: &Global,
+    device_id: id::DeviceId,
+    handle: &VkSemaphoreHandle,
+) -> i32 {
+    let file_descriptor = unsafe {
+        global.device_as_hal::<wgc::api::Vulkan, _, Option<i32>>(device_id, |hal_device| {
+            let hal_device = emit_critical_invalid_note_if_none("Vulkan device", hal_device)?;
+            let device = hal_device.raw_device();
+            let instance = hal_device.shared_instance().raw_instance();
+
+            let external_semaphore_fd = khr::external_semaphore_fd::Device::new(instance, device);
+            let get_fd_info = vk::SemaphoreGetFdInfoKHR::default()
+                .semaphore(handle.semaphore)
+                .handle_type(vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_FD);
+
+            external_semaphore_fd.get_semaphore_fd(&get_fd_info).ok()
+        })
+    };
+
+    // From [Wikipedia](https://en.wikipedia.org/wiki/File_descriptor):
+    //
+    // > File descriptors typically have non-negative integer values, with negative values
+    // > being reserved to indicate "no value" or error conditions.
+    file_descriptor.unwrap_or(-1)
+}
+
+#[no_mangle]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub unsafe extern "C" fn wgpu_vksemaphore_destroy(
+    global: &Global,
+    device_id: id::DeviceId,
+    handle: &VkSemaphoreHandle,
+) {
+    unsafe {
+        global.device_as_hal::<wgc::api::Vulkan, _, ()>(device_id, |hal_device| {
+            let hal_device = emit_critical_invalid_note_if_none("Vulkan device", hal_device);
+            let hal_device = match hal_device {
+                None => {
+                    return;
+                }
+                Some(hal_device) => hal_device,
+            };
+            let device = hal_device.raw_device();
+            device.destroy_semaphore(handle.semaphore, None);
+        })
+    };
+}
+
+#[no_mangle]
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub unsafe extern "C" fn wgpu_vksemaphore_delete(handle: *mut VkSemaphoreHandle) {
+    let _ = Box::from_raw(handle);
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn wgpu_server_on_submitted_work_done(
     global: &Global,
@@ -2549,7 +2662,13 @@ pub unsafe extern "C" fn wgpu_server_queue_write_action(
     mut error_buf: ErrorBuffer,
 ) {
     let action: QueueWriteAction = bincode::deserialize(byte_buf.as_slice()).unwrap();
-    let data = slice::from_raw_parts(data, data_length);
+    // It is undefined behavior to pass a null pointer to `slice::from_raw_parts`, so in the case
+    // of a null pointer (which occurs if `data_length` is 0), we use a dangling pointer.
+    let data = ptr::NonNull::new(data as *mut u8).unwrap_or_else(|| {
+        assert!(data_length == 0);
+        ptr::NonNull::dangling()
+    });
+    let data = slice::from_raw_parts(data.as_ptr(), data_length);
     let result = match action {
         QueueWriteAction::Buffer { dst, offset } => {
             global.queue_write_buffer(self_id, dst, offset, data)
