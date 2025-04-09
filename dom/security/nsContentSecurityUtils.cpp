@@ -1420,6 +1420,9 @@ static nsLiteralCString sConnectSrcAddonsAllowList[] = {
     "about:addons"_ns,
     // STOP! Do not add anything to this list.
 };
+// connect-src https://example.org
+//  Any https host source.
+static nsLiteralCString sConnectSrcHttpsHostAllowList[] = {"about:logging"_ns};
 
 class DisallowingVisitor : public nsCSPSrcVisitor {
  public:
@@ -1662,6 +1665,11 @@ class ConnectSrcVisitor : public AllowBuiltinSrcVisitor {
     }
 
     return AllowBuiltinSrcVisitor::visitSchemeSrc(src);
+  }
+
+  bool visitHostSrc(const nsCSPHostSrc& src) override {
+    return VisitHostSrcWithWildcardAndHttpsHostAllowLists(
+        src, nullptr, sConnectSrcHttpsHostAllowList);
   }
 };
 
@@ -1952,12 +1960,9 @@ void nsContentSecurityUtils::AssertChromePageHasCSP(Document* aDocument) {
       "chrome://browser/content/default-bookmarks.html"_ns,
       "chrome://browser/content/places/interactionsViewer.html"_ns,
       "chrome://browser/content/shopping/review-checker.xhtml"_ns,
-      "chrome://browser/content/webext-panels.xhtml"_ns,
-      "chrome://extensions/content/dummy.xhtml"_ns,
       "chrome://geckoview/content/geckoview.xhtml"_ns,
       "chrome://global/content/alerts/alert.xhtml"_ns,
       "chrome://global/content/appPicker.xhtml"_ns,
-      "chrome://global/content/backgroundPageThumbs.xhtml"_ns,
       "chrome://global/content/megalist/megalist.html"_ns,
       // Test files
       "chrome://mochikit/"_ns,

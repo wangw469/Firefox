@@ -199,7 +199,12 @@ bool nsWindow::OnPaint(uint32_t aNestingLevel) {
     region.OrWith(translucentRegion);
     mClearedRegion = std::move(translucentRegion);
 
-    if (!regionToClear.IsEmpty()) {
+    // Don't clear the region for unaccelerated transparent windows;
+    // We clear the whole window below anyways, and doing so could cause
+    // flicker, as Windows doesn't guarantee atomicity even between
+    // ::BeginPaint and ::EndPaint, see bug 1958631.
+    if (!regionToClear.IsEmpty() &&
+        renderer->GetBackendType() != LayersBackend::LAYERS_NONE) {
       auto black = reinterpret_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH));
       // We could use RegionToHRGN, but at least for simple regions (and possibly
       // for complex ones too?) FillRect is faster; see bug 1946365 comment 12.
@@ -258,25 +263,16 @@ bool nsWindow::OnPaint(uint32_t aNestingLevel) {
         return false;
       }
 
-      // don't need to double buffer with anything but GDI
-      BufferMode doubleBuffering = mozilla::layers::BufferMode::BUFFER_NONE;
-      switch (mTransparencyMode) {
-        case TransparencyMode::Transparent:
-          // If we're rendering with translucency, we're going to be
-          // rendering the whole window; make sure we clear it first
-          dt->ClearRect(Rect(dt->GetRect()));
-          break;
-        default:
-          // If we're not doing translucency, then double buffer
-          doubleBuffering = mozilla::layers::BufferMode::BUFFERED;
-          break;
+      if (mTransparencyMode == TransparencyMode::Transparent) {
+        // If we're rendering with translucency, we're going to be
+        // rendering the whole window; make sure we clear it first
+        dt->ClearRect(Rect(dt->GetRect()));
       }
 
       gfxContext thebesContext(dt);
 
       {
-        AutoLayerManagerSetup setupLayerManager(this, &thebesContext,
-                                                doubleBuffering);
+        AutoLayerManagerSetup setupLayerManager(this, &thebesContext);
         if (nsIWidgetListener* listener = GetPaintListener()) {
           result = listener->PaintWindow(this, region);
         }

@@ -18,7 +18,7 @@
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/layers/FenceD3D11.h"
 #include "mozilla/layers/GpuProcessD3D11TextureMap.h"
-#include "mozilla/layers/GpuProcessD3D11FencesHolderMap.h"
+#include "mozilla/layers/CompositeProcessD3D11FencesHolderMap.h"
 #include "mozilla/layers/TextureD3D11.h"
 
 namespace mozilla {
@@ -30,7 +30,7 @@ RenderDXGITextureHost::RenderDXGITextureHost(
     const uint32_t aArrayIndex, const gfx::SurfaceFormat aFormat,
     const gfx::ColorSpace2 aColorSpace, const gfx::ColorRange aColorRange,
     const gfx::IntSize aSize, bool aHasKeyedMutex,
-    const Maybe<layers::GpuProcessFencesHolderId>& aFencesHolderId)
+    const Maybe<layers::CompositeProcessFencesHolderId>& aFencesHolderId)
     : mHandle(aHandle),
       mGpuProcessTextureId(aGpuProcessTextureId),
       mArrayIndex(aArrayIndex),
@@ -371,7 +371,7 @@ bool RenderDXGITextureHost::LockInternal() {
 
   if (!mLocked) {
     if (mFencesHolderId.isSome()) {
-      auto* fencesHolderMap = layers::GpuProcessD3D11FencesHolderMap::Get();
+      auto* fencesHolderMap = layers::CompositeProcessD3D11FencesHolderMap::Get();
       if (!fencesHolderMap) {
         MOZ_ASSERT_UNREACHABLE("unexpected to be called");
         return false;
@@ -477,7 +477,7 @@ RenderDXGIYCbCrTextureHost::RenderDXGIYCbCrTextureHost(
     const gfx::YUVColorSpace aYUVColorSpace, const gfx::ColorDepth aColorDepth,
     const gfx::ColorRange aColorRange, const gfx::IntSize aSizeY,
     const gfx::IntSize aSizeCbCr,
-    const layers::GpuProcessFencesHolderId aFencesHolderId)
+    const layers::CompositeProcessFencesHolderId aFencesHolderId)
     : mHandles{aHandles[0], aHandles[1], aHandles[2]},
       mSurfaces{0},
       mStreams{0},
@@ -642,7 +642,7 @@ bool RenderDXGIYCbCrTextureHost::EnsureD3D11Texture2D(ID3D11Device* aDevice) {
 
 bool RenderDXGIYCbCrTextureHost::LockInternal() {
   if (!mLocked) {
-    auto* fencesHolderMap = layers::GpuProcessD3D11FencesHolderMap::Get();
+    auto* fencesHolderMap = layers::CompositeProcessD3D11FencesHolderMap::Get();
     if (!fencesHolderMap) {
       MOZ_ASSERT_UNREACHABLE("unexpected to be called");
       return false;

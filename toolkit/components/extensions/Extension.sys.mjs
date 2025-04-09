@@ -158,6 +158,11 @@ const lazy = XPCOMUtils.declareLazy({
       ])
     );
   },
+
+  dataCollectionPermissionsEnabled: {
+    pref: "extensions.dataCollectionPermissions.enabled",
+    default: false,
+  },
 });
 
 var {
@@ -922,6 +927,7 @@ export class ExtensionData {
     this.apiNames = new Set();
     this.dependencies = new Set();
     this.permissions = new Set();
+    this.dataCollectionPermissions = new Set();
 
     this.startupData = null;
 
@@ -1222,6 +1228,31 @@ export class ExtensionData {
     return {
       permissions: Array.from(permissions),
       origins: this.originControls ? [] : this.getManifestOrigins(),
+      data_collection: lazy.dataCollectionPermissionsEnabled
+        ? this.getDataCollectionPermissions().required
+        : [],
+    };
+  }
+
+  /**
+   * @param {object} manifest A normalized manifest (which, in this case, means
+   * that `browser_specific_settings` was folded into `applications`).
+   *
+   * @returns {{required:Array<string>, optional: Array<string>}} an object
+   * containing the `required` and `optional` data collection permissions
+   * listed in the manifest.
+   */
+  getDataCollectionPermissions(manifest = this.manifest) {
+    if (this.type !== "extension") {
+      return { required: [], optional: [] };
+    }
+
+    const data_collection_permissions =
+      manifest.applications?.gecko?.data_collection_permissions;
+
+    return {
+      required: Array.from(new Set(data_collection_permissions?.required)),
+      optional: Array.from(new Set(data_collection_permissions?.optional)),
     };
   }
 
@@ -1271,16 +1302,36 @@ export class ExtensionData {
 
   /**
    * Returns additional permissions that extensions is requesting based on its
-   * manifest. For now, this is host_permissions (and content scripts) in mv3.
+   * manifest. For now, this is host_permissions (and content scripts) in mv3,
+   * and the "technicalAndInteraction" optional data collection permission.
    */
   getRequestedPermissions() {
     if (this.type !== "extension") {
       return null;
     }
+
+    // We unconditionally return a list of `data_collection` so that we don't
+    // have to check the presence of `data_collection` everywhere. For example,
+    // `data_collection` is used for the `installPermissions` property of the
+    // add-on wrapper, defined in `XPIDatabase`.
+    const data_collection = lazy.dataCollectionPermissionsEnabled
+      ? this.getDataCollectionPermissions().optional.filter(
+          perm => perm === "technicalAndInteraction"
+        )
+      : [];
+
     if (this.originControls && lazy.installIncludesOrigins) {
-      return { permissions: [], origins: this.getManifestOrigins() };
+      return {
+        permissions: [],
+        origins: this.getManifestOrigins(),
+        data_collection,
+      };
     }
-    return { permissions: [], origins: [] };
+    return {
+      permissions: [],
+      origins: [],
+      data_collection,
+    };
   }
 
   /**
@@ -1301,6 +1352,8 @@ export class ExtensionData {
         origins.add(origin);
       }
     }
+
+    // TODO: Bug 1955990 - add support for data collection permissions.
 
     return {
       permissions: Array.from(permissions),
@@ -1787,8 +1840,12 @@ export class ExtensionData {
       }
 
       // take the presence of preferred_environment as clue the author knows what it is doing
-      const hasPreference = Array.isArray(background.preferred_environment);
-      if (!hasPreference && WebExtensionPolicy.backgroundServiceWorkerEnabled) {
+      if (
+        !background.preferred_environment &&
+        background.service_worker &&
+        (background.page || background.scripts) &&
+        WebExtensionPolicy.backgroundServiceWorkerEnabled
+      ) {
         // both serviceWorker and document are specified, educate the author on the deterministic behaviour
         const documentType = background.page ? "page" : "scripts";
         this.manifestWarning(
@@ -1839,6 +1896,7 @@ export class ExtensionData {
     let dependencies = new Set();
     let originPermissions = new Set();
     let permissions = new Set();
+    let dataCollectionPermissions = new Set();
     let webAccessibleResources = [];
 
     let schemaPromises = new Map();
@@ -1857,6 +1915,7 @@ export class ExtensionData {
       originControls: this.manifestVersion >= 3 && this.type === "extension",
       originPermissions,
       permissions,
+      dataCollectionPermissions,
       schemaURLs: null,
       type: this.type,
       webAccessibleResources,
@@ -1945,6 +2004,14 @@ export class ExtensionData {
       for (let i = manifest.optional_permissions.length - 1; i >= 0; --i) {
         if (shouldIgnorePermission(manifest.optional_permissions[i])) {
           manifest.optional_permissions.splice(i, 1);
+        }
+      }
+
+      if (lazy.dataCollectionPermissionsEnabled) {
+        const { required } = this.getDataCollectionPermissions(manifest);
+
+        for (const permission of required) {
+          dataCollectionPermissions.add(permission);
         }
       }
 
@@ -2204,6 +2271,7 @@ export class ExtensionData {
     this.allowedOrigins = new MatchPatternSet(manifestData.originPermissions, {
       restrictSchemes: this.restrictSchemes,
     });
+    this.dataCollectionPermissions = manifestData.dataCollectionPermissions;
 
     return this.manifest;
   }
