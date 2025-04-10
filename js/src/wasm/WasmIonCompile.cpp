@@ -337,7 +337,7 @@ class RootCompiler {
         alloc_(alloc),
         mirGraph_(&alloc),
         mirGen_(nullptr, options_, &alloc_, &mirGraph_, &compileInfo_,
-                IonOptimizations.get(OptimizationLevel::Wasm)),
+                IonOptimizations.get(OptimizationLevel::Wasm), &codeMeta),
         loopDepth_(0),
         inliningBudget_(0),
         tryNotes_(tryNotes) {}
@@ -537,7 +537,8 @@ class FunctionCompiler {
 
     // Prepare the entry block for MIR generation:
 
-    const ArgTypeVector args(funcType());
+    const FuncType& ft = funcType();
+    const ArgTypeVector args(ft);
 
     if (!mirGen().ensureBallast()) {
       return false;
@@ -547,7 +548,15 @@ class FunctionCompiler {
     }
 
     for (WasmABIArgIter i(args); !i.done(); i++) {
-      MWasmParameter* ins = MWasmParameter::New(alloc(), *i, i.mirType());
+      MaybeRefType argRefType;
+      if (!args.isSyntheticStackResultPointerArg(i.index())) {
+        ValType argType = ft.arg(i.index());
+        argRefType = argType.isRefType() ? MaybeRefType(argType.refType())
+                                         : MaybeRefType();
+      }
+
+      MWasmParameter* ins =
+          MWasmParameter::New(alloc(), *i, i.mirType(), argRefType);
       curBlock_->add(ins);
       if (args.isSyntheticStackResultPointerArg(i.index())) {
         MOZ_ASSERT(stackResultPointer_ == nullptr);
@@ -742,12 +751,12 @@ class FunctionCompiler {
   MDefinition* constantV128(T) = delete;
 #endif
 
-  MDefinition* constantNullRef() {
+  MDefinition* constantNullRef(MaybeRefType type) {
     if (inDeadCode()) {
       return nullptr;
     }
     // MConstant has a lot of baggage so we don't use that here.
-    MWasmNullConstant* constant = MWasmNullConstant::New(alloc());
+    MWasmNullConstant* constant = MWasmNullConstant::New(alloc(), type);
     curBlock_->add(constant);
     return constant;
   }
@@ -768,7 +777,7 @@ class FunctionCompiler {
       case ValType::F64:
         return constantF64(0.0);
       case ValType::Ref:
-        return constantNullRef();
+        return constantNullRef(MaybeRefType(valType.refType()));
       default:
         MOZ_CRASH();
     }
@@ -1144,7 +1153,7 @@ class FunctionCompiler {
   }
 
   MDefinition* compareIsNull(MDefinition* ref, JSOp compareOp) {
-    MDefinition* nullVal = constantNullRef();
+    MDefinition* nullVal = constantNullRef(MaybeRefType());
     if (!nullVal) {
       return nullptr;
     }
@@ -1981,14 +1990,13 @@ class FunctionCompiler {
 
   /************************************************ Global variable accesses */
 
-  MDefinition* loadGlobalVar(unsigned instanceDataOffset, bool isConst,
-                             bool isIndirect, MIRType type) {
+  MDefinition* loadGlobalVar(const GlobalDesc& global) {
     if (inDeadCode()) {
       return nullptr;
     }
 
     MInstruction* load;
-    if (isIndirect) {
+    if (global.isIndirect()) {
       // Pull a pointer to the value out of Instance::globalArea, then
       // load from that pointer.  Note that the pointer is immutable
       // even though the value it points at may change, hence the use of
@@ -1996,14 +2004,17 @@ class FunctionCompiler {
       // the |isConst| formal parameter to this method.  The latter
       // applies to the denoted value as a whole.
       auto* cellPtr = MWasmLoadInstanceDataField::New(
-          alloc(), MIRType::Pointer, instanceDataOffset,
+          alloc(), MIRType::Pointer, global.offset(),
           /*isConst=*/true, instancePointer_);
       curBlock_->add(cellPtr);
-      load = MWasmLoadGlobalCell::New(alloc(), type, cellPtr);
+      load = MWasmLoadGlobalCell::New(alloc(), global.type().toMIRType(),
+                                      cellPtr, global.type().toMaybeRefType());
     } else {
       // Pull the value directly out of Instance::globalArea.
-      load = MWasmLoadInstanceDataField::New(alloc(), type, instanceDataOffset,
-                                             isConst, instancePointer_);
+      load = MWasmLoadInstanceDataField::New(
+          alloc(), global.type().toMIRType(), global.offset(),
+          !global.isMutable(), instancePointer_,
+          global.type().toMaybeRefType());
     }
     curBlock_->add(load);
     return load;
@@ -2130,6 +2141,8 @@ class FunctionCompiler {
   }
 
   MDefinition* tableGetAnyRef(uint32_t tableIndex, MDefinition* address) {
+    const TableDesc& table = codeMeta().tables[tableIndex];
+
     // Load the table length and perform a bounds check with spectre index
     // masking
     auto* length = loadTableLength(tableIndex);
@@ -2142,7 +2155,8 @@ class FunctionCompiler {
 
     // Load the table elements and load the element
     auto* elements = loadTableElements(tableIndex);
-    auto* element = MWasmLoadTableElement::New(alloc(), elements, address);
+    auto* element =
+        MWasmLoadTableElement::New(alloc(), elements, address, table.elemType);
     curBlock_->add(element);
     return element;
   }
@@ -2150,6 +2164,8 @@ class FunctionCompiler {
   [[nodiscard]] bool tableSetAnyRef(uint32_t tableIndex, MDefinition* address,
                                     MDefinition* value,
                                     uint32_t lineOrBytecode) {
+    const TableDesc& table = codeMeta().tables[tableIndex];
+
     // Load the table length and perform a bounds check with spectre index
     // masking
     auto* length = loadTableLength(tableIndex);
@@ -2164,7 +2180,8 @@ class FunctionCompiler {
     auto* elements = loadTableElements(tableIndex);
 
     // Load the previous value
-    auto* prevValue = MWasmLoadTableElement::New(alloc(), elements, address);
+    auto* prevValue =
+        MWasmLoadTableElement::New(alloc(), elements, address, table.elemType);
     curBlock_->add(prevValue);
 
     // Compute the value's location for the post barrier
@@ -2505,7 +2522,8 @@ class FunctionCompiler {
             break;
           case wasm::ValType::Ref:
             def = MWasmRegisterResult::New(alloc(), MIRType::WasmAnyRef,
-                                           result.gpr());
+                                           result.gpr(),
+                                           result.type().toMaybeRefType());
             break;
           case wasm::ValType::V128:
 #ifdef ENABLE_WASM_SIMD
@@ -4253,7 +4271,7 @@ class FunctionCompiler {
     loadPendingExceptionState(pendingException, pendingExceptionTag);
 
     // Clear the pending exception and tag
-    auto* null = constantNullRef();
+    auto* null = constantNullRef(MaybeRefType());
     if (!setPendingExceptionState(null, null)) {
       return false;
     }
@@ -4452,7 +4470,8 @@ class FunctionCompiler {
       auto* load =
           MWasmLoadField::New(alloc(), data, exception, offsets[i],
                               mozilla::Nothing(), params[i].toMIRType(),
-                              MWideningOp::None, AliasSet::Load(AliasSet::Any));
+                              MWideningOp::None, AliasSet::Load(AliasSet::Any),
+                              mozilla::Nothing(), params[i].toMaybeRefType());
       if (!load || !values->append(load)) {
         return false;
       }
@@ -4892,9 +4911,10 @@ class FunctionCompiler {
       maybeTrap.emplace(trapSiteDesc());
     }
 
-    auto* load = MWasmLoadField::New(
-        alloc(), base, keepAlive, offset, mozilla::Some(fieldIndex), mirType,
-        mirWideningOp, AliasSet::Load(aliasBitset), maybeTrap);
+    auto* load = MWasmLoadField::New(alloc(), base, keepAlive, offset,
+                                     mozilla::Some(fieldIndex), mirType,
+                                     mirWideningOp, AliasSet::Load(aliasBitset),
+                                     maybeTrap, type.toMaybeRefType());
     if (!load) {
       return nullptr;
     }
@@ -4918,7 +4938,8 @@ class FunctionCompiler {
     Scale scale = scaleFromFieldType(type);
     auto* load = MWasmLoadElement::New(
         alloc(), base, keepAlive, index, mirType, mirWideningOp, scale,
-        AliasSet::Load(aliasBitset), mozilla::Some(trapSiteDesc()));
+        AliasSet::Load(aliasBitset), mozilla::Some(trapSiteDesc()),
+        type.toMaybeRefType());
     if (!load) {
       return nullptr;
     }
@@ -4979,22 +5000,16 @@ class FunctionCompiler {
   [[nodiscard]] MDefinition* createStructObject(uint32_t typeIndex,
                                                 uint32_t allocSiteIndex,
                                                 bool zeroFields) {
-    const TypeDef& typeDef = (*codeMeta().types)[typeIndex];
-    gc::AllocKind allocKind = WasmStructObject::allocKindForTypeDef(&typeDef);
-    bool isOutline =
-        WasmStructObject::requiresOutlineBytes(typeDef.structType().size_);
-
     // Allocate an uninitialized struct.
     MDefinition* allocSite = loadAllocSiteInstanceData(allocSiteIndex);
     if (!allocSite) {
       return nullptr;
     }
 
-    size_t offsetOfTypeDefData = wasm::Instance::offsetInData(
-        codeMeta().offsetOfTypeDefInstanceData(typeIndex));
-    auto* structObject = MWasmNewStructObject::New(
-        alloc(), instancePointer_, allocSite, typeIndex, offsetOfTypeDefData,
-        typeDef.structType(), isOutline, zeroFields, allocKind, trapSiteDesc());
+    const TypeDef* typeDef = &(*codeMeta().types)[typeIndex];
+    auto* structObject =
+        MWasmNewStructObject::New(alloc(), instancePointer_, allocSite, typeDef,
+                                  zeroFields, trapSiteDesc());
     if (!structObject) {
       return nullptr;
     }
@@ -5183,18 +5198,16 @@ class FunctionCompiler {
   [[nodiscard]] MDefinition* createArrayObject(uint32_t typeIndex,
                                                uint32_t allocSiteIndex,
                                                MDefinition* numElements,
-                                               uint32_t elemSize,
                                                bool zeroFields) {
     MDefinition* allocSite = loadAllocSiteInstanceData(allocSiteIndex);
     if (!allocSite) {
       return nullptr;
     }
 
-    size_t offsetOfTypeDefData = wasm::Instance::offsetInData(
-        codeMeta().offsetOfTypeDefInstanceData(typeIndex));
+    const TypeDef* typeDef = &(*codeMeta().types)[typeIndex];
     auto* arrayObject = MWasmNewArrayObject::New(
-        alloc(), instancePointer_, numElements, allocSite, typeIndex,
-        offsetOfTypeDefData, elemSize, zeroFields, trapSiteDesc());
+        alloc(), instancePointer_, numElements, allocSite, typeDef, zeroFields,
+        trapSiteDesc());
     if (!arrayObject) {
       return nullptr;
     }
@@ -5369,12 +5382,10 @@ class FunctionCompiler {
                                                        uint32_t allocSiteIndex,
                                                        MDefinition* numElements,
                                                        MDefinition* fillValue) {
-    const ArrayType& arrayType = (*codeMeta().types)[typeIndex].arrayType();
-
     // Create the array object, uninitialized.
     MDefinition* arrayObject =
         createArrayObject(typeIndex, allocSiteIndex, numElements,
-                          arrayType.elementType().size(), /*zeroFields=*/false);
+                          /*zeroFields=*/false);
     if (!arrayObject) {
       return nullptr;
     }
@@ -5385,6 +5396,7 @@ class FunctionCompiler {
     // reftyped case, that would be a big win since each iteration requires a
     // call to the post-write barrier routine.
 
+    const ArrayType& arrayType = (*codeMeta().types)[typeIndex].arrayType();
     if (!fillArray(lineOrBytecode, arrayType, arrayObject, constantI32(0),
                    numElements, fillValue, WasmPreBarrierKind::None)) {
       return nullptr;
@@ -5685,6 +5697,16 @@ class FunctionCompiler {
     curBlock_->end(jump);
     curBlock_ = fallthroughBlock;
     return true;
+  }
+
+  [[nodiscard]] MDefinition* convertAnyExtern(MDefinition* ref,
+                                              wasm::RefType::Kind kind) {
+    auto* converted = MWasmRefConvertAnyExtern::New(alloc(), ref, kind);
+    if (!converted) {
+      return nullptr;
+    }
+    curBlock_->add(converted);
+    return converted;
   }
 
   /************************************************************ DECODING ***/
@@ -6690,9 +6712,7 @@ bool FunctionCompiler::emitGetGlobal() {
 
   const GlobalDesc& global = codeMeta().globals[id];
   if (!global.isConstant()) {
-    iter().setResult(loadGlobalVar(global.offset(), !global.isMutable(),
-                                   global.isIndirect(),
-                                   global.type().toMIRType()));
+    iter().setResult(loadGlobalVar(global));
     return true;
   }
 
@@ -6721,7 +6741,7 @@ bool FunctionCompiler::emitGetGlobal() {
 #endif
     case ValType::Ref:
       MOZ_ASSERT(value.ref().isNull());
-      result = constantNullRef();
+      result = constantNullRef(MaybeRefType(value.type().refType()));
       break;
     default:
       MOZ_CRASH("unexpected type in EmitGetGlobal");
@@ -8173,7 +8193,7 @@ bool FunctionCompiler::emitRefNull() {
     return true;
   }
 
-  MDefinition* nullVal = constantNullRef();
+  MDefinition* nullVal = constantNullRef(MaybeRefType(type));
   if (!nullVal) {
     return false;
   }
@@ -8191,7 +8211,7 @@ bool FunctionCompiler::emitRefIsNull() {
     return true;
   }
 
-  MDefinition* nullVal = constantNullRef();
+  MDefinition* nullVal = constantNullRef(MaybeRefType());
   if (!nullVal) {
     return false;
   }
@@ -8731,10 +8751,9 @@ bool FunctionCompiler::emitArrayNewDefault() {
   }
 
   // Create the array object, default-initialized.
-  const ArrayType& arrayType = (*codeMeta().types)[typeIndex].arrayType();
   MDefinition* arrayObject =
       createArrayObject(typeIndex, allocSiteIndex, numElements,
-                        arrayType.elementType().size(), /*zeroFields=*/true);
+                        /*zeroFields=*/true);
   if (!arrayObject) {
     return false;
   }
@@ -8770,7 +8789,7 @@ bool FunctionCompiler::emitArrayNewFixed() {
   StorageType elemType = arrayType.elementType();
   uint32_t elemSize = elemType.size();
   MDefinition* arrayObject =
-      createArrayObject(typeIndex, allocSiteIndex, numElementsDef, elemSize,
+      createArrayObject(typeIndex, allocSiteIndex, numElementsDef,
                         /*zeroFields=*/false);
   if (!arrayObject) {
     return false;
@@ -9220,26 +9239,40 @@ bool FunctionCompiler::emitBrOnCast(bool onSuccess) {
 }
 
 bool FunctionCompiler::emitAnyConvertExtern() {
-  // any.convert_extern is a no-op because anyref and extern share the same
-  // representation
   MDefinition* ref;
   if (!iter().readRefConversion(RefType::extern_(), RefType::any(), &ref)) {
     return false;
   }
 
-  iter().setResult(ref);
+  if (inDeadCode()) {
+    return true;
+  }
+
+  MDefinition* conversion = convertAnyExtern(ref, wasm::RefType::Kind::Any);
+  if (!conversion) {
+    return false;
+  }
+
+  iter().setResult(conversion);
   return true;
 }
 
 bool FunctionCompiler::emitExternConvertAny() {
-  // extern.convert_any is a no-op because anyref and extern share the same
-  // representation
   MDefinition* ref;
   if (!iter().readRefConversion(RefType::any(), RefType::extern_(), &ref)) {
     return false;
   }
 
-  iter().setResult(ref);
+  if (inDeadCode()) {
+    return true;
+  }
+
+  MDefinition* conversion = convertAnyExtern(ref, wasm::RefType::Kind::Extern);
+  if (!conversion) {
+    return false;
+  }
+
+  iter().setResult(conversion);
   return true;
 }
 
@@ -10675,7 +10708,7 @@ bool wasm::IonCompileFunctions(const CodeMetadata& codeMeta,
 
       size_t unwindInfoBefore = masm.codeRangeUnwindInfos().length();
 
-      CodeGenerator codegen(&rootCompiler.mirGen(), lir, &masm);
+      CodeGenerator codegen(&rootCompiler.mirGen(), lir, &masm, &codeMeta);
 
       TrapSiteDesc prologueTrapSiteDesc(
           wasm::BytecodeOffset(func.lineOrBytecode));

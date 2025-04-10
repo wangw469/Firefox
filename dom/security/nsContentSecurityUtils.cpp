@@ -1247,6 +1247,7 @@ static nsLiteralCString sStyleSrcUnsafeInlineAllowList[] = {
     "chrome://browser/content/places/bookmarkProperties.xhtml"_ns,
     "chrome://browser/content/places/bookmarksSidebar.xhtml"_ns,
     "chrome://browser/content/places/historySidebar.xhtml"_ns,
+    "chrome://browser/content/places/interactionsViewer.html"_ns,
     "chrome://browser/content/places/places.xhtml"_ns,
     "chrome://browser/content/preferences/dialogs/applicationManager.xhtml"_ns,
     "chrome://browser/content/preferences/dialogs/browserLanguages.xhtml"_ns,
@@ -1501,7 +1502,8 @@ class AllowBuiltinSrcVisitor : public DisallowingVisitor {
   bool visitSchemeSrc(const nsCSPSchemeSrc& src) override {
     nsAutoString scheme;
     src.getScheme(scheme);
-    if (scheme == u"chrome"_ns || scheme == u"moz-src" || scheme == u"resource"_ns) {
+    if (scheme == u"chrome"_ns || scheme == u"moz-src" ||
+        scheme == u"resource"_ns) {
       return true;
     }
 
@@ -1835,8 +1837,7 @@ void nsContentSecurityUtils::AssertAboutPageHasCSP(Document* aDocument) {
 
   const nsCSPPolicy* policy = csp->GetPolicy(0);
   {
-    AllowBuiltinSrcVisitor visitor(CSPDirective::DEFAULT_SRC_DIRECTIVE,
-                                          spec);
+    AllowBuiltinSrcVisitor visitor(CSPDirective::DEFAULT_SRC_DIRECTIVE, spec);
     if (!visitor.visit(policy)) {
       MOZ_ASSERT(false, "about: page must contain a secure default-src");
     }
@@ -1913,8 +1914,7 @@ void nsContentSecurityUtils::AssertChromePageHasCSP(Document* aDocument) {
     const nsCSPPolicy* policy =
         static_cast<nsCSPContext*>(csp.get())->GetPolicy(0);
     {
-      AllowBuiltinSrcVisitor visitor(CSPDirective::DEFAULT_SRC_DIRECTIVE,
-                                            spec);
+      AllowBuiltinSrcVisitor visitor(CSPDirective::DEFAULT_SRC_DIRECTIVE, spec);
       if (!visitor.visit(policy)) {
         MOZ_CRASH_UNSAFE_PRINTF(
             "Document (%s) CSP does not have a default-src!", spec.get());
@@ -1957,13 +1957,10 @@ void nsContentSecurityUtils::AssertChromePageHasCSP(Document* aDocument) {
   }
 
   static nsLiteralCString sAllowedChromePagesWithNoCSP[] = {
-      "chrome://browser/content/default-bookmarks.html"_ns,
-      "chrome://browser/content/places/interactionsViewer.html"_ns,
       "chrome://browser/content/shopping/review-checker.xhtml"_ns,
       "chrome://geckoview/content/geckoview.xhtml"_ns,
       "chrome://global/content/alerts/alert.xhtml"_ns,
       "chrome://global/content/appPicker.xhtml"_ns,
-      "chrome://global/content/megalist/megalist.html"_ns,
       // Test files
       "chrome://mochikit/"_ns,
       "chrome://mochitests/"_ns,
