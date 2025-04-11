@@ -2268,11 +2268,12 @@ class Document : public nsINode,
   static bool CallerIsTrustedAboutCertError(JSContext* aCx, JSObject* aObject);
 
   /**
-   * This function checks if the privilege storage access api is available for
-   * the caller. We only allow privilege SSA to be called by system principal
-   * and webcompat extension.
+   * This function checks if the caller has access to privileged chrome APIs
+   * such as the storage access API and inAndroidPipMode. We only allow such
+   * APIs to be called by system principal and the built-in webcompat addon.
    */
-  static bool CallerCanAccessPrivilegeSSA(JSContext* aCx, JSObject* aObject);
+  static bool CallerIsSystemPrincipalOrWebCompatAddon(JSContext* aCx,
+                                                      JSObject* aObject);
 
   /**
    * Get the security info (i.e. certificate validity, errorCode, etc) for a
@@ -2694,6 +2695,23 @@ class Document : public nsINode,
     nsPIDOMWindowInner* inner = GetInnerWindow();
     return inner && inner->IsCurrentInnerWindow() && inner->GetDoc() == this;
   }
+
+  /**
+   * Return true if this document is fully active as described by spec.
+   * https://html.spec.whatwg.org/multipage/document-sequences.html#fully-active
+   */
+  bool IsFullyActive() const {
+    nsPIDOMWindowInner* inner = GetInnerWindow();
+    return inner && inner->IsFullyActive();
+  }
+
+  /*
+   * Return if this document ever has been scrolled.
+   * We'd like this to be
+   * https://html.spec.whatwg.org/#has-been-scrolled-by-the-user, but better to
+   * check for any scroll than no scroll.
+   */
+  bool HasBeenScrolled() const;
 
   /**
    * Returns whether this document should perform image loads.

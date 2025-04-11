@@ -8623,7 +8623,7 @@
   # Experimental support for Temporal in JavaScript.
 - name: javascript.options.experimental.temporal
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
   set_spidermonkey_pref: startup
 #endif  // JS_HAS_TEMPORAL_API
@@ -11304,16 +11304,13 @@
 # using the IPC actor within the Utility process rather than the RDD process.
 # When it is set to true, then the utility process will take precedence over RDD
 # to perform audio decoding.
-# TODO: Enabling for Isolated Processes builds on Android
 - name: media.utility-process.enabled
   type: RelaxedAtomicBool
 #if defined(XP_WIN)
   value: true
 #elif defined(XP_MACOSX)
   value: true
-#elif defined(XP_LINUX) && !defined(ANDROID)
-  value: true
-#elif defined(ANDROID) && !defined(MOZ_ANDROID_CONTENT_SERVICE_ISOLATED_PROCESS)
+#elif defined(XP_LINUX) || defined(ANDROID)
   value: true
 #elif defined(XP_FREEBSD)
   value: true
@@ -11648,7 +11645,11 @@
 # 0 : disabled, 1 : enabled allowed list, 2 : enabled blocked list
 -   name: media.eme.mfcdm.origin-filter.enabled
     type: RelaxedAtomicUint32
+#if defined(MOZ_DEV_EDITION) || defined(EARLY_BETA_OR_EARLIER)
     value: 2
+#else
+    value: 1
+#endif
     mirror: always
 
 #endif  # MOZ_WMF

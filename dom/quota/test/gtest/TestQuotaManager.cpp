@@ -2023,6 +2023,67 @@ TEST_F(TestQuotaManager, SaveOriginAccessTime_Simple) {
   ASSERT_NO_FATAL_FAILURE(ShutdownStorage());
 }
 
+// Test SaveOriginAccessTime when saving of origin access time already finished
+// with an exclusive client directory lock for a different client scope
+// acquired in between.
+TEST_F(TestQuotaManager,
+       SaveOriginAccessTime_FinishedWithOtherExclusiveClientDirectoryLock) {
+  auto testOriginMetadata = GetTestOriginMetadata();
+
+  ASSERT_NO_FATAL_FAILURE(ShutdownStorage());
+
+  ASSERT_NO_FATAL_FAILURE(AssertStorageNotInitialized());
+  ASSERT_NO_FATAL_FAILURE(AssertTemporaryStorageNotInitialized());
+  ASSERT_NO_FATAL_FAILURE(
+      AssertTemporaryOriginNotInitialized(testOriginMetadata));
+
+  PerformOnBackgroundThread([testOriginMetadata]() {
+    QuotaManager* quotaManager = QuotaManager::Get();
+    ASSERT_TRUE(quotaManager);
+
+    // Save origin access time first to ensure required initialization is
+    // complete. Otherwise, the exclusive directory lock below may not be
+    // acquirable.
+    {
+      int64_t timestamp = PR_Now();
+
+      auto value = Await(
+          quotaManager->SaveOriginAccessTime(testOriginMetadata, timestamp));
+      ASSERT_TRUE(value.IsResolve());
+    }
+
+    // Acquire an exclusive directory lock for the SimpleDB quota client.
+    RefPtr<ClientDirectoryLock> directoryLock =
+        quotaManager->CreateDirectoryLock(GetTestClientMetadata(),
+                                          /* aExclusive */ true);
+
+    {
+      auto value = Await(directoryLock->Acquire());
+      ASSERT_TRUE(value.IsResolve());
+    }
+
+    // Save origin access time while the exclusive directory lock for SimpleDB
+    // is held. Verifies that saving origin access time uses a lock that does
+    // not overlap with quota client directory locks.
+    {
+      int64_t timestamp = PR_Now();
+
+      auto value = Await(
+          quotaManager->SaveOriginAccessTime(testOriginMetadata, timestamp));
+      ASSERT_TRUE(value.IsResolve());
+    }
+
+    DropDirectoryLock(directoryLock);
+  });
+
+  ASSERT_NO_FATAL_FAILURE(AssertStorageInitialized());
+  ASSERT_NO_FATAL_FAILURE(AssertTemporaryStorageNotInitialized());
+  ASSERT_NO_FATAL_FAILURE(
+      AssertTemporaryOriginNotInitialized(testOriginMetadata));
+
+  ASSERT_NO_FATAL_FAILURE(ShutdownStorage());
+}
+
 // Test simple ClearStoragesForOrigin.
 TEST_F(TestQuotaManager, ClearStoragesForOrigin_Simple) {
   ASSERT_NO_FATAL_FAILURE(ShutdownStorage());

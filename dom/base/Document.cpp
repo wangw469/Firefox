@@ -106,6 +106,7 @@
 #include "mozilla/SMILAnimationController.h"
 #include "mozilla/SMILTimeContainer.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/ScrollContainerFrame.h"
 #include "mozilla/Components.h"
 #include "mozilla/SVGUtils.h"
 #include "mozilla/ServoStyleConsts.h"
@@ -1760,7 +1761,8 @@ bool Document::CallerIsTrustedAboutCertError(JSContext* aCx,
 #endif
 }
 
-bool Document::CallerCanAccessPrivilegeSSA(JSContext* aCx, JSObject* aObject) {
+bool Document::CallerIsSystemPrincipalOrWebCompatAddon(JSContext* aCx,
+                                                       JSObject* aObject) {
   RefPtr<BasePrincipal> principal =
       BasePrincipal::Cast(nsContentUtils::SubjectPrincipal(aCx));
 
@@ -1768,13 +1770,12 @@ bool Document::CallerCanAccessPrivilegeSSA(JSContext* aCx, JSObject* aObject) {
     return false;
   }
 
-  // We allow the privilege SSA to be called from system principal.
+  // We allow the privileged APIs to be called from system principal.
   if (principal->IsSystemPrincipal()) {
     return true;
   }
 
-  // We only allow calling the privilege SSA from the content script of the
-  // webcompat extension.
+  // We only allow calling privileged APIs from the webcompat extension.
   if (auto* policy = principal->ContentScriptAddonPolicy()) {
     nsAutoString addonID;
     policy->GetId(addonID);
@@ -13269,6 +13270,18 @@ void Document::SetSuppressedEventListener(EventListener* aListener) {
 bool Document::IsActive() const {
   return mDocumentContainer && !mRemovedFromDocShell && GetBrowsingContext() &&
          !GetBrowsingContext()->IsInBFCache();
+}
+
+bool Document::HasBeenScrolled() const {
+  nsGlobalWindowInner* window = nsGlobalWindowInner::Cast(GetInnerWindow());
+  if (!window) {
+    return false;
+  }
+  if (ScrollContainerFrame* frame = window->GetScrollContainerFrame()) {
+    return frame->HasBeenScrolled();
+  }
+
+  return false;
 }
 
 nsISupports* Document::GetCurrentContentSink() {
